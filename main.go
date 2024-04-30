@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
+	"runtime"
 	"sort"
 
 	"github.com/pointlander/compress"
@@ -112,16 +113,18 @@ func (v *Vectors) Split(bounds []Bounds) []Split {
 
 // K computes the K complexity
 func (v *Vectors) K() int {
-	v.Rng.Shuffle(len(v.Vectors), func(i, j int) {
-		v.Vectors[i], v.Vectors[j] = v.Vectors[j], v.Vectors[i]
-	})
-	labels := make([]uint8, 0, 8)
-	for _, vector := range v.Vectors {
-		labels = append(labels, vector.Labels...)
+	cost := 0
+	for col := 0; col < v.Width; col++ {
+		v.Sort(col)
+		labels := make([]uint8, 0, 8)
+		for _, vector := range v.Vectors {
+			labels = append(labels, vector.Labels...)
+		}
+		buffer := bytes.Buffer{}
+		compress.Mark1Compress1(labels, &buffer)
+		cost += buffer.Len()
 	}
-	buffer := bytes.Buffer{}
-	compress.Mark1Compress1(labels, &buffer)
-	return buffer.Len()
+	return cost
 }
 
 // Vectors is a set of vectors
@@ -286,11 +289,30 @@ func Starlight() {
 		return vectors
 	}
 	optimizer := matrix.NewOptimizer(&rng, 8, .1, 4, func(samples []matrix.Sample, x ...matrix.Matrix) {
-		for index := range samples {
-			vectors := process(index, samples[index])
-			samples[index].Cost = float64(vectors.K())
+		done := make(chan bool, 8)
+		sample := func(index int, s *matrix.Sample) {
+			vectors := process(index, *s)
+			s.Cost = float64(vectors.K())
+			done <- true
 		}
-	}, matrix.NewCoord(4, 8), matrix.NewCoord(8, 1), matrix.NewCoord(16, 16), matrix.NewCoord(16, 1))
+		index, flight, cpus := 0, 0, runtime.NumCPU()
+		for flight < cpus && index < len(samples) {
+			go sample(index, &samples[index])
+			index++
+			flight++
+		}
+		for index < len(samples) {
+			<-done
+			flight--
+
+			go sample(index, &samples[index])
+			index++
+			flight++
+		}
+		for i := 0; i < flight; i++ {
+			<-done
+		}
+	}, matrix.NewCoord(4, 8), matrix.NewCoord(8, 1), matrix.NewCoord(16, 3), matrix.NewCoord(3, 1))
 	var sample matrix.Sample
 	for i := 0; i < 33; i++ {
 		sample = optimizer.Iterate()
