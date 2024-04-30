@@ -19,6 +19,7 @@ import (
 
 // Vector is a vector with labels
 type Vector struct {
+	Number int
 	Vector []float64
 	Labels []uint8
 }
@@ -240,6 +241,7 @@ func Starlight() {
 				vector[j] = float64(output.Data[i*output.Cols+j])
 			}
 			vectors.Vectors[i] = Vector{
+				Number: i,
 				Vector: vector,
 				Labels: labels,
 			}
@@ -295,6 +297,9 @@ func Starlight() {
 		fmt.Println(i, sample.Cost)
 	}
 	vectors := process(0, sample)
+	sort.Slice(vectors.Vectors, func(i, j int) bool {
+		return vectors.Vectors[i].Number < vectors.Vectors[j].Number
+	})
 	rawData := make([][]float64, len(vectors.Vectors))
 	for i := range vectors.Vectors {
 		rawData[i] = make([]float64, len(vectors.Vectors))
