@@ -128,6 +128,18 @@ func (v *Vectors) K() int {
 	return cost
 }
 
+// KK computes the K complexity for given column
+func (v *Vectors) KK(col int) int {
+	v.Sort(col)
+	labels := make([]uint8, 0, 8)
+	for _, vector := range v.Vectors {
+		labels = append(labels, vector.Labels...)
+	}
+	buffer := bytes.Buffer{}
+	compress.Mark1Compress1(labels, &buffer)
+	return buffer.Len()
+}
+
 // Vectors is a set of vectors
 type Sorter struct {
 	Vec *Vectors
@@ -231,7 +243,17 @@ func Starlight() {
 		z4 := sample.Vars[3][2].Sample()
 		b2 := x4.Add(y4.H(z4))
 
-		output := w2.MulT(w1.MulT(input).Add(b1).Everett()).Add(b2)
+		x5 := sample.Vars[4][0].Sample()
+		y5 := sample.Vars[4][1].Sample()
+		z5 := sample.Vars[4][2].Sample()
+		w3 := x5.Add(y5.H(z5))
+
+		x6 := sample.Vars[5][0].Sample()
+		y6 := sample.Vars[5][1].Sample()
+		z6 := sample.Vars[5][2].Sample()
+		b3 := x6.Add(y6.H(z6))
+
+		output := w3.MulT(w2.MulT(w1.MulT(input).Add(b1).Everett()).Add(b2).Everett()).Add(b3)
 
 		vectors := Vectors{
 			Width:   output.Cols,
@@ -289,11 +311,12 @@ func Starlight() {
 		}
 		return vectors
 	}
-	optimizer := matrix.NewOptimizer(&rng, 8, .1, 4, func(samples []matrix.Sample, x ...matrix.Matrix) {
+	col := 0
+	optimizer := matrix.NewOptimizer(&rng, 8, .1, 6, func(samples []matrix.Sample, x ...matrix.Matrix) {
 		done := make(chan bool, 8)
 		sample := func(index int, s *matrix.Sample) {
 			vectors := process(index, *s)
-			s.Cost = float64(vectors.K())
+			s.Cost = float64(vectors.KK(col))
 			done <- true
 		}
 		index, flight, cpus := 0, 0, runtime.NumCPU()
@@ -313,16 +336,59 @@ func Starlight() {
 		for i := 0; i < flight; i++ {
 			<-done
 		}
-	}, matrix.NewCoord(4, 8), matrix.NewCoord(8, 1), matrix.NewCoord(16, 3), matrix.NewCoord(3, 1))
+	}, matrix.NewCoord(4, 8), matrix.NewCoord(8, 1), matrix.NewCoord(16, 8), matrix.NewCoord(8, 1),
+		matrix.NewCoord(16, 8), matrix.NewCoord(8, 1))
 	var sample matrix.Sample
 	for i := 0; i < 33; i++ {
 		sample = optimizer.Iterate()
 		fmt.Println(i, sample.Cost)
 	}
+	col++
 	vectors := process(0, sample)
 	sort.Slice(vectors.Vectors, func(i, j int) bool {
 		return vectors.Vectors[i].Number < vectors.Vectors[j].Number
 	})
+	for i := 1; i < 8; i++ {
+		optimizer := matrix.NewOptimizer(&rng, 8, .1, 6, func(samples []matrix.Sample, x ...matrix.Matrix) {
+			done := make(chan bool, 8)
+			sample := func(index int, s *matrix.Sample) {
+				vectors := process(index, *s)
+				s.Cost = float64(vectors.KK(col))
+				done <- true
+			}
+			index, flight, cpus := 0, 0, runtime.NumCPU()
+			for flight < cpus && index < len(samples) {
+				go sample(index, &samples[index])
+				index++
+				flight++
+			}
+			for index < len(samples) {
+				<-done
+				flight--
+
+				go sample(index, &samples[index])
+				index++
+				flight++
+			}
+			for i := 0; i < flight; i++ {
+				<-done
+			}
+		}, matrix.NewCoord(4, 8), matrix.NewCoord(8, 1), matrix.NewCoord(16, 8), matrix.NewCoord(8, 1),
+			matrix.NewCoord(16, 8), matrix.NewCoord(8, 1))
+		for i := 0; i < 33; i++ {
+			sample = optimizer.Iterate()
+			fmt.Println(i, sample.Cost)
+		}
+		col++
+		vecs := process(0, sample)
+		sort.Slice(vecs.Vectors, func(i, j int) bool {
+			return vecs.Vectors[i].Number < vecs.Vectors[j].Number
+		})
+		for j := range vectors.Vectors {
+			vectors.Vectors[j].Vector = append(vectors.Vectors[j].Vector, vecs.Vectors[j].Vector...)
+			vectors.Vectors[j].Labels = append(vectors.Vectors[j].Labels, vecs.Vectors[j].Labels...)
+		}
+	}
 	rawData := make([][]float64, len(vectors.Vectors))
 	for i := range vectors.Vectors {
 		rawData[i] = make([]float64, len(vectors.Vectors))
