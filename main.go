@@ -6,6 +6,7 @@ package main
 
 import (
 	"bytes"
+	"flag"
 	"fmt"
 	"math"
 	"math/rand"
@@ -566,7 +567,21 @@ func Starlight2() {
 	entropy(clusters)
 }
 
+var (
+	// FlagOne
+	FlagOne = flag.Bool("one", false, "one")
+	// FlagTwo
+	FlagTwo = flag.Bool("two", false, "two")
+)
+
 func main() {
-	//Starlight()
-	Starlight2()
+	flag.Parse()
+
+	if *FlagOne {
+		Starlight()
+		return
+	} else if *FlagTwo {
+		Starlight2()
+		return
+	}
 }
