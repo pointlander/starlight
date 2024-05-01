@@ -346,6 +346,216 @@ func Starlight() {
 	entropy(clusters)
 }
 
+// Starlight2 is the starlight2 mode
+func Starlight2() {
+	rng := matrix.Rand(1)
+
+	datum, err := iris.Load()
+	if err != nil {
+		panic(err)
+	}
+
+	max := 0.0
+	for _, data := range datum.Fisher {
+		for _, measure := range data.Measures {
+			if measure > max {
+				max = measure
+			}
+		}
+	}
+	input := matrix.NewMatrix(4, 150)
+	for _, data := range datum.Fisher {
+		for _, measure := range data.Measures {
+			input.Data = append(input.Data, float32(measure/max))
+		}
+	}
+
+	entropy := func(clusters []int) {
+		ab, ba := [3][3]float64{}, [3][3]float64{}
+		for i := range datum.Fisher {
+			a := int(iris.Labels[datum.Fisher[i].Label])
+			b := clusters[i]
+			ab[a][b]++
+			ba[b][a]++
+		}
+		entropy := 0.0
+		for i := 0; i < 3; i++ {
+			entropy += (1.0 / 3.0) * math.Log(1.0/3.0)
+		}
+		fmt.Println(-entropy, -(1.0/3.0)*math.Log(1.0/3.0))
+		for i := range ab {
+			entropy := 0.0
+			for _, value := range ab[i] {
+				if value > 0 {
+					p := value / 150
+					entropy += p * math.Log(p)
+				}
+			}
+			entropy = -entropy
+			fmt.Println("ab", i, entropy)
+		}
+		for i := range ba {
+			entropy := 0.0
+			for _, value := range ba[i] {
+				if value > 0 {
+					p := value / 150
+					entropy += p * math.Log(p)
+				}
+			}
+			entropy = -entropy
+			fmt.Println("ba", i, entropy)
+		}
+	}
+
+	process := func(index int, sample matrix.Sample) Vectors {
+		x1 := sample.Vars[0][0].Sample()
+		y1 := sample.Vars[0][1].Sample()
+		z1 := sample.Vars[0][2].Sample()
+		w1 := x1.Add(y1.H(z1))
+
+		x2 := sample.Vars[1][0].Sample()
+		y2 := sample.Vars[1][1].Sample()
+		z2 := sample.Vars[1][2].Sample()
+		w2 := x2.Add(y2.H(z2))
+
+		x3 := sample.Vars[2][0].Sample()
+		y3 := sample.Vars[2][1].Sample()
+		z3 := sample.Vars[2][2].Sample()
+		w3 := x3.Add(y3.H(z3))
+
+		x4 := sample.Vars[3][0].Sample()
+		y4 := sample.Vars[3][1].Sample()
+		z4 := sample.Vars[3][2].Sample()
+		w4 := x4.Add(y4.H(z4))
+
+		x5 := sample.Vars[4][0].Sample()
+		y5 := sample.Vars[4][1].Sample()
+		z5 := sample.Vars[4][2].Sample()
+		b1 := x5.Add(y5.H(z5))
+
+		in := w4.MulT(input).Add(b1).Everett()
+		q := w1.MulT(in)
+		k := w2.MulT(in)
+		v := w3.MulT(in)
+
+		output := matrix.SelfAttention(q, k, v)
+
+		vectors := Vectors{
+			Width:   output.Cols,
+			Vectors: make([]Vector, output.Rows),
+			Rng:     rand.New(rand.NewSource(int64(index) + 1)),
+		}
+		for i := range vectors.Vectors {
+			vector := make([]float64, vectors.Width)
+			labels := make([]uint8, vectors.Width)
+			for j := range vector {
+				vector[j] = float64(output.Data[i*output.Cols+j])
+			}
+			vectors.Vectors[i] = Vector{
+				Number: i,
+				Vector: vector,
+				Labels: labels,
+			}
+		}
+
+		bounds := make([]Bounds, 0, 8)
+		for i := 0; i < vectors.Width; i++ {
+			bounds = append(bounds, Bounds{
+				Begin: 0,
+				End:   len(vectors.Vectors),
+			})
+		}
+		splits := vectors.Split(bounds)
+		boundsUpper := make([]Bounds, 0, 8)
+		boundsLower := make([]Bounds, 0, 8)
+		for i := range splits {
+			boundsUpper = append(boundsUpper, Bounds{
+				Begin: 0,
+				End:   splits[i].Index,
+			})
+			boundsLower = append(boundsLower, Bounds{
+				Begin: splits[i].Index,
+				End:   len(vectors.Vectors),
+			})
+			for j := splits[i].Index; j < len(vectors.Vectors); j++ {
+				vectors.Vectors[j].Labels[i] = 1
+			}
+		}
+		splitsA := vectors.Split(boundsUpper)
+		splitsB := vectors.Split(boundsLower)
+		for i := range splitsA {
+			if splitsA[i].Var > splitsB[i].Var {
+				for j := splitsA[i].Index; j < splits[i].Index; j++ {
+					vectors.Vectors[j].Labels[i] = 2
+				}
+			} else {
+				for j := splitsB[i].Index; j < len(vectors.Vectors); j++ {
+					vectors.Vectors[j].Labels[i] = 2
+				}
+			}
+		}
+		return vectors
+	}
+	optimizer := matrix.NewOptimizer(&rng, 8, .1, 5, func(samples []matrix.Sample, x ...matrix.Matrix) {
+		done := make(chan bool, 8)
+		sample := func(index int, s *matrix.Sample) {
+			vectors := process(index, *s)
+			s.Cost = float64(vectors.K())
+			done <- true
+		}
+		index, flight, cpus := 0, 0, runtime.NumCPU()
+		for flight < cpus && index < len(samples) {
+			go sample(index, &samples[index])
+			index++
+			flight++
+		}
+		for index < len(samples) {
+			<-done
+			flight--
+
+			go sample(index, &samples[index])
+			index++
+			flight++
+		}
+		for i := 0; i < flight; i++ {
+			<-done
+		}
+	}, matrix.NewCoord(16, 16), matrix.NewCoord(16, 16), matrix.NewCoord(16, 16),
+		matrix.NewCoord(4, 8), matrix.NewCoord(8, 1))
+	var sample matrix.Sample
+	for i := 0; i < 33; i++ {
+		sample = optimizer.Iterate()
+		fmt.Println(i, sample.Cost)
+	}
+	vectors := process(0, sample)
+	sort.Slice(vectors.Vectors, func(i, j int) bool {
+		return vectors.Vectors[i].Number < vectors.Vectors[j].Number
+	})
+	rawData := make([][]float64, len(vectors.Vectors))
+	for i := range vectors.Vectors {
+		rawData[i] = make([]float64, len(vectors.Vectors))
+		for j := range rawData[i] {
+			diff := 0.0
+			for k, a := range vectors.Vectors[i].Labels {
+				b := vectors.Vectors[j].Labels[k]
+				if a != b {
+					diff++
+				}
+			}
+			rawData[i][j] = diff
+		}
+	}
+	clusters, _, err := kmeans.Kmeans(1, rawData, 3, kmeans.SquaredEuclideanDistance, -1)
+	if err != nil {
+		panic(err)
+	}
+	for i := range vectors.Vectors {
+		fmt.Println(clusters[i], datum.Fisher[i].Label, vectors.Vectors[i].Labels)
+	}
+	entropy(clusters)
+}
+
 func main() {
-	Starlight()
+	//Starlight()
+	Starlight2()
 }
