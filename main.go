@@ -112,6 +112,55 @@ func (v *Vectors) Split(bounds []Bounds) []Split {
 	return splits
 }
 
+func (v *Vectors) SplitMulti(bounds []Bounds) []Split {
+	splits := make([]Split, 0, 8)
+
+	for col := 0; col < v.Width; col++ {
+		v.Sort(col)
+
+		vars := matrix.NewMatrix(v.Width, len(v.Vectors))
+		for _, vector := range v.Vectors {
+			for _, item := range vector.Vector {
+				vars.Data = append(vars.Data, float32(item))
+			}
+		}
+
+		multi := matrix.NewMultiFromData(vars.Slice(bounds[col].Begin, bounds[col].End).T())
+		stddev := 0.0
+		for j := 0; j < multi.E.Cols; j++ {
+			x := float64(multi.E.Data[col*multi.E.Cols+j])
+			stddev += x * x
+		}
+		stddev = math.Sqrt(stddev)
+
+		max, index := 0.0, 0
+		for i := bounds[col].Begin; i < bounds[col].End-1; i++ {
+			multiA := matrix.NewMultiFromData(vars.Slice(bounds[col].Begin, i+1).T())
+			multiB := matrix.NewMultiFromData(vars.Slice(i+1, bounds[col].End).T())
+			stddevA, stddevB := 0.0, 0.0
+			for j := 0; j < multiA.E.Cols; j++ {
+				x := float64(multiA.E.Data[col*multiA.E.Cols+j])
+				stddevA += x * x
+			}
+			stddevA = math.Sqrt(stddevA)
+			for j := 0; j < multiB.E.Cols; j++ {
+				x := float64(multiB.E.Data[col*multiB.E.Cols+j])
+				stddevB += x * x
+			}
+			stddevB = math.Sqrt(stddevB)
+			if v := stddev - (stddevA + stddevB); v > max {
+				max, index = v, i
+			}
+		}
+		splits = append(splits, Split{
+			Col:   col,
+			Index: index + 1,
+			Var:   max,
+		})
+	}
+	return splits
+}
+
 // K computes the K complexity
 func (v *Vectors) K() int {
 	cost := 0
@@ -126,18 +175,6 @@ func (v *Vectors) K() int {
 		cost += buffer.Len()
 	}
 	return cost
-}
-
-// KK computes the K complexity for given column
-func (v *Vectors) KK(col int) int {
-	v.Sort(col)
-	labels := make([]uint8, 0, 8)
-	for _, vector := range v.Vectors {
-		labels = append(labels, vector.Labels...)
-	}
-	buffer := bytes.Buffer{}
-	compress.Mark1Compress1(labels, &buffer)
-	return buffer.Len()
 }
 
 // Vectors is a set of vectors
@@ -280,7 +317,7 @@ func Starlight() {
 				End:   len(vectors.Vectors),
 			})
 		}
-		splits := vectors.Split(bounds)
+		splits := vectors.SplitMulti(bounds)
 		boundsUpper := make([]Bounds, 0, 8)
 		boundsLower := make([]Bounds, 0, 8)
 		for i := range splits {
@@ -296,8 +333,8 @@ func Starlight() {
 				vectors.Vectors[j].Labels[i] = 1
 			}
 		}
-		splitsA := vectors.Split(boundsUpper)
-		splitsB := vectors.Split(boundsLower)
+		splitsA := vectors.SplitMulti(boundsUpper)
+		splitsB := vectors.SplitMulti(boundsLower)
 		for i := range splitsA {
 			if splitsA[i].Var > splitsB[i].Var {
 				for j := splitsA[i].Index; j < splits[i].Index; j++ {
@@ -311,12 +348,11 @@ func Starlight() {
 		}
 		return vectors
 	}
-	col := 0
 	optimizer := matrix.NewOptimizer(&rng, 8, .1, 6, func(samples []matrix.Sample, x ...matrix.Matrix) {
 		done := make(chan bool, 8)
 		sample := func(index int, s *matrix.Sample) {
 			vectors := process(index, *s)
-			s.Cost = float64(vectors.KK(col))
+			s.Cost = float64(vectors.K())
 			done <- true
 		}
 		index, flight, cpus := 0, 0, runtime.NumCPU()
@@ -337,58 +373,16 @@ func Starlight() {
 			<-done
 		}
 	}, matrix.NewCoord(4, 8), matrix.NewCoord(8, 1), matrix.NewCoord(16, 8), matrix.NewCoord(8, 1),
-		matrix.NewCoord(16, 8), matrix.NewCoord(8, 1))
+		matrix.NewCoord(16, 3), matrix.NewCoord(3, 1))
 	var sample matrix.Sample
 	for i := 0; i < 33; i++ {
 		sample = optimizer.Iterate()
 		fmt.Println(i, sample.Cost)
 	}
-	col++
 	vectors := process(0, sample)
 	sort.Slice(vectors.Vectors, func(i, j int) bool {
 		return vectors.Vectors[i].Number < vectors.Vectors[j].Number
 	})
-	for i := 1; i < 8; i++ {
-		optimizer := matrix.NewOptimizer(&rng, 8, .1, 6, func(samples []matrix.Sample, x ...matrix.Matrix) {
-			done := make(chan bool, 8)
-			sample := func(index int, s *matrix.Sample) {
-				vectors := process(index, *s)
-				s.Cost = float64(vectors.KK(col))
-				done <- true
-			}
-			index, flight, cpus := 0, 0, runtime.NumCPU()
-			for flight < cpus && index < len(samples) {
-				go sample(index, &samples[index])
-				index++
-				flight++
-			}
-			for index < len(samples) {
-				<-done
-				flight--
-
-				go sample(index, &samples[index])
-				index++
-				flight++
-			}
-			for i := 0; i < flight; i++ {
-				<-done
-			}
-		}, matrix.NewCoord(4, 8), matrix.NewCoord(8, 1), matrix.NewCoord(16, 8), matrix.NewCoord(8, 1),
-			matrix.NewCoord(16, 8), matrix.NewCoord(8, 1))
-		for i := 0; i < 33; i++ {
-			sample = optimizer.Iterate()
-			fmt.Println(i, sample.Cost)
-		}
-		col++
-		vecs := process(0, sample)
-		sort.Slice(vecs.Vectors, func(i, j int) bool {
-			return vecs.Vectors[i].Number < vecs.Vectors[j].Number
-		})
-		for j := range vectors.Vectors {
-			vectors.Vectors[j].Vector = append(vectors.Vectors[j].Vector, vecs.Vectors[j].Vector...)
-			vectors.Vectors[j].Labels = append(vectors.Vectors[j].Labels, vecs.Vectors[j].Labels...)
-		}
-	}
 	rawData := make([][]float64, len(vectors.Vectors))
 	for i := range vectors.Vectors {
 		rawData[i] = make([]float64, len(vectors.Vectors))
