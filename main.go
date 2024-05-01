@@ -433,12 +433,23 @@ func Starlight2() {
 		z5 := sample.Vars[4][2].Sample()
 		b1 := x5.Add(y5.H(z5))
 
+		x6 := sample.Vars[5][0].Sample()
+		y6 := sample.Vars[5][1].Sample()
+		z6 := sample.Vars[5][2].Sample()
+		w5 := x6.Add(y6.H(z6))
+
+		x7 := sample.Vars[6][0].Sample()
+		y7 := sample.Vars[6][1].Sample()
+		z7 := sample.Vars[6][2].Sample()
+		b2 := x7.Add(y7.H(z7))
+
 		in := w4.MulT(input).Add(b1).Everett()
 		q := w1.MulT(in)
 		k := w2.MulT(in)
 		v := w3.MulT(in)
 
 		output := matrix.SelfAttention(q, k, v)
+		output = w5.MulT(output).Add(b2)
 
 		vectors := Vectors{
 			Width:   output.Cols,
@@ -496,7 +507,7 @@ func Starlight2() {
 		}
 		return vectors
 	}
-	optimizer := matrix.NewOptimizer(&rng, 8, .1, 5, func(samples []matrix.Sample, x ...matrix.Matrix) {
+	optimizer := matrix.NewOptimizer(&rng, 8, .1, 7, func(samples []matrix.Sample, x ...matrix.Matrix) {
 		done := make(chan bool, 8)
 		sample := func(index int, s *matrix.Sample) {
 			vectors := process(index, *s)
@@ -521,7 +532,7 @@ func Starlight2() {
 			<-done
 		}
 	}, matrix.NewCoord(16, 16), matrix.NewCoord(16, 16), matrix.NewCoord(16, 16),
-		matrix.NewCoord(4, 8), matrix.NewCoord(8, 1))
+		matrix.NewCoord(4, 8), matrix.NewCoord(8, 1), matrix.NewCoord(16, 16), matrix.NewCoord(16, 1))
 	var sample matrix.Sample
 	for i := 0; i < 33; i++ {
 		sample = optimizer.Iterate()
