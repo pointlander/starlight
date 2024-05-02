@@ -221,6 +221,26 @@ func Starlight() {
 			input.Data = append(input.Data, float32(measure/max))
 		}
 	}
+	synth := matrix.NewMultiFromData(input.T())
+	synth.LearnA(&rng, nil)
+	for i := 0; i < 150; i++ {
+		vector := make([]float64, 4)
+		measures := synth.Sample(&rng).Data
+		for j := range vector {
+			vector[j] = float64(measures[j])
+		}
+		datum.Fisher = append(datum.Fisher, iris.Iris{
+			Label:    "Synth",
+			Measures: vector,
+		})
+	}
+	in := matrix.NewMatrix(4, 300)
+	for _, data := range datum.Fisher {
+		for _, measure := range data.Measures {
+			in.Data = append(in.Data, float32(measure/max))
+		}
+	}
+	input = in
 
 	entropy := func(clusters []int) {
 		ab, ba := [3][3]float64{}, [3][3]float64{}
