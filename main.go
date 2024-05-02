@@ -207,18 +207,10 @@ func Starlight() {
 		panic(err)
 	}
 
-	max := 0.0
-	for _, data := range datum.Fisher {
-		for _, measure := range data.Measures {
-			if measure > max {
-				max = measure
-			}
-		}
-	}
 	input := matrix.NewMatrix(4, 150)
 	for _, data := range datum.Fisher {
 		for _, measure := range data.Measures {
-			input.Data = append(input.Data, float32(measure/max))
+			input.Data = append(input.Data, float32(measure))
 		}
 	}
 	synth := matrix.NewMultiFromData(input.T())
@@ -233,6 +225,14 @@ func Starlight() {
 			Label:    "Synth",
 			Measures: vector,
 		})
+	}
+	max := 0.0
+	for _, data := range datum.Fisher {
+		for _, measure := range data.Measures {
+			if measure > max {
+				max = measure
+			}
+		}
 	}
 	in := matrix.NewMatrix(4, 300)
 	for _, data := range datum.Fisher {
@@ -356,15 +356,15 @@ func Starlight() {
 		splitsA := vectors.SplitMulti(boundsUpper)
 		splitsB := vectors.SplitMulti(boundsLower)
 		for i := range splitsA {
-			if splitsA[i].Var > splitsB[i].Var {
-				for j := splitsA[i].Index; j < splits[i].Index; j++ {
-					vectors.Vectors[j].Labels[i] = 2
-				}
-			} else {
-				for j := splitsB[i].Index; j < len(vectors.Vectors); j++ {
-					vectors.Vectors[j].Labels[i] = 2
-				}
+			//if splitsA[i].Var > splitsB[i].Var {
+			for j := splitsA[i].Index; j < splits[i].Index; j++ {
+				vectors.Vectors[j].Labels[i] = 2
 			}
+			//} else {
+			for j := splitsB[i].Index; j < len(vectors.Vectors); j++ {
+				vectors.Vectors[j].Labels[i] = 3
+			}
+			//}
 		}
 		return vectors
 	}
