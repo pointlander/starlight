@@ -19,6 +19,11 @@ import (
 	"github.com/pointlander/starlight/kmeans"
 )
 
+const (
+	// Clusters is the number of clusters
+	Clusters = 4
+)
+
 // Vector is a vector with labels
 type Vector struct {
 	Number int
@@ -243,7 +248,7 @@ func Starlight() {
 	input = in
 
 	entropy := func(clusters []int) {
-		ab, ba := [4][4]float64{}, [4][4]float64{}
+		ab, ba := [Clusters][Clusters]float64{}, [Clusters][Clusters]float64{}
 		for i := range datum.Fisher {
 			a := int(iris.Labels[datum.Fisher[i].Label])
 			b := clusters[i]
@@ -251,10 +256,10 @@ func Starlight() {
 			ba[b][a]++
 		}
 		entropy := 0.0
-		for i := 0; i < 4; i++ {
-			entropy += (1.0 / 4.0) * math.Log(1.0/4.0)
+		for i := 0; i < Clusters; i++ {
+			entropy += (1.0 / float64(Clusters)) * math.Log(1.0/float64(Clusters))
 		}
-		fmt.Println(-entropy, -(1.0/4.0)*math.Log(1.0/4.0))
+		fmt.Println(-entropy, -(1.0/float64(Clusters))*math.Log(1.0/float64(Clusters)))
 		for i := range ab {
 			entropy := 0.0
 			for _, value := range ab[i] {
@@ -417,7 +422,7 @@ func Starlight() {
 			rawData[i][j] = diff
 		}
 	}
-	clusters, _, err := kmeans.Kmeans(1, rawData, 4, kmeans.SquaredEuclideanDistance, -1)
+	clusters, _, err := kmeans.Kmeans(1, rawData, Clusters, kmeans.SquaredEuclideanDistance, -1)
 	if err != nil {
 		panic(err)
 	}
@@ -436,6 +441,25 @@ func Starlight2() {
 		panic(err)
 	}
 
+	input := matrix.NewMatrix(4, 150)
+	for _, data := range datum.Fisher {
+		for _, measure := range data.Measures {
+			input.Data = append(input.Data, float32(measure))
+		}
+	}
+	synth := matrix.NewMultiFromData(input.T())
+	synth.LearnA(&rng, nil)
+	for i := 0; i < 150; i++ {
+		vector := make([]float64, 4)
+		measures := synth.Sample(&rng).Data
+		for j := range vector {
+			vector[j] = float64(measures[j])
+		}
+		datum.Fisher = append(datum.Fisher, iris.Iris{
+			Label:    "Synth",
+			Measures: vector,
+		})
+	}
 	max := 0.0
 	for _, data := range datum.Fisher {
 		for _, measure := range data.Measures {
@@ -444,15 +468,16 @@ func Starlight2() {
 			}
 		}
 	}
-	input := matrix.NewMatrix(4, 150)
+	in := matrix.NewMatrix(4, 300)
 	for _, data := range datum.Fisher {
 		for _, measure := range data.Measures {
-			input.Data = append(input.Data, float32(measure/max))
+			in.Data = append(in.Data, float32(measure/max))
 		}
 	}
+	input = in
 
 	entropy := func(clusters []int) {
-		ab, ba := [3][3]float64{}, [3][3]float64{}
+		ab, ba := [Clusters][Clusters]float64{}, [Clusters][Clusters]float64{}
 		for i := range datum.Fisher {
 			a := int(iris.Labels[datum.Fisher[i].Label])
 			b := clusters[i]
@@ -460,10 +485,10 @@ func Starlight2() {
 			ba[b][a]++
 		}
 		entropy := 0.0
-		for i := 0; i < 3; i++ {
-			entropy += (1.0 / 3.0) * math.Log(1.0/3.0)
+		for i := 0; i < Clusters; i++ {
+			entropy += (1.0 / float64(Clusters)) * math.Log(1.0/float64(Clusters))
 		}
-		fmt.Println(-entropy, -(1.0/3.0)*math.Log(1.0/3.0))
+		fmt.Println(-entropy, -(1.0/float64(Clusters))*math.Log(1.0/float64(Clusters)))
 		for i := range ab {
 			entropy := 0.0
 			for _, value := range ab[i] {
@@ -637,7 +662,7 @@ func Starlight2() {
 			rawData[i][j] = diff
 		}
 	}
-	clusters, _, err := kmeans.Kmeans(1, rawData, 3, kmeans.SquaredEuclideanDistance, -1)
+	clusters, _, err := kmeans.Kmeans(1, rawData, Clusters, kmeans.SquaredEuclideanDistance, -1)
 	if err != nil {
 		panic(err)
 	}
