@@ -36,6 +36,8 @@ type Vectors struct {
 	Width   int
 	Vectors []Vector
 	Rng     *rand.Rand
+	Mean    []float64
+	Stddev  []float64
 }
 
 // Size is the size of vectors
@@ -672,11 +674,182 @@ func Starlight2() {
 	entropy(clusters)
 }
 
+// Starlight3
+func Starlight3() {
+	rng := matrix.Rand(1)
+
+	datum, err := iris.Load()
+	if err != nil {
+		panic(err)
+	}
+
+	input := matrix.NewMatrix(4, 150)
+	for _, data := range datum.Fisher {
+		for _, measure := range data.Measures {
+			input.Data = append(input.Data, float32(measure))
+		}
+	}
+	synth := matrix.NewMultiFromData(input.T())
+	synth.LearnA(&rng, nil)
+	for i := 0; i < 150; i++ {
+		vector := make([]float64, 4)
+		measures := synth.Sample(&rng).Data
+		for j := range vector {
+			vector[j] = float64(measures[j])
+		}
+		datum.Fisher = append(datum.Fisher, iris.Iris{
+			Label:    "Synth",
+			Measures: vector,
+		})
+	}
+	max := 0.0
+	for _, data := range datum.Fisher {
+		for _, measure := range data.Measures {
+			if measure > max {
+				max = measure
+			}
+		}
+	}
+	in := matrix.NewMatrix(4, 300)
+	for _, data := range datum.Fisher {
+		for _, measure := range data.Measures {
+			in.Data = append(in.Data, float32(measure/max))
+		}
+	}
+	input = in
+
+	process := func(index int, sample matrix.Sample) float64 {
+		x1 := sample.Vars[0][0].Sample()
+		y1 := sample.Vars[0][1].Sample()
+		z1 := sample.Vars[0][2].Sample()
+		selection := x1.Add(y1.H(z1))
+
+		mean := make([]float64, selection.Cols)
+		for i := 0; i < selection.Rows; i++ {
+			for j := 0; j < selection.Cols; j++ {
+				mean[j] += float64(input.Data[i*input.Cols+j])
+			}
+		}
+		for i := range mean {
+			mean[i] /= float64(selection.Rows)
+		}
+		stddev := make([]float64, selection.Cols)
+		for i := 0; i < selection.Rows; i++ {
+			for j := 0; j < selection.Cols; j++ {
+				diff := mean[j] - float64(input.Data[i*input.Cols+j])
+				stddev[j] += diff * diff
+			}
+		}
+
+		vectors := make([]Vectors, selection.Cols)
+		for i := range vectors {
+			vectors[i] = Vectors{
+				Width:   input.Cols,
+				Vectors: make([]Vector, 0, input.Rows),
+				Rng:     rand.New(rand.NewSource(int64(index) + 1)),
+				Mean:    make([]float64, input.Cols),
+				Stddev:  make([]float64, input.Cols),
+			}
+		}
+		for i := 0; i < selection.Rows; i++ {
+			for j := 0; j < selection.Cols; j++ {
+				if selection.Data[i*selection.Cols+j] > 0 {
+					vector := make([]float64, vectors[j].Width)
+					labels := make([]uint8, vectors[j].Width)
+					for j := range vector {
+						vector[j] = float64(input.Data[i*input.Cols+j])
+					}
+					vectors[j].Vectors = append(vectors[j].Vectors, Vector{
+						Number: i,
+						Vector: vector,
+						Labels: labels,
+					})
+				}
+			}
+		}
+
+		for i := range vectors {
+			for j := range vectors[i].Vectors {
+				for k, value := range vectors[i].Vectors[j].Vector {
+					vectors[i].Mean[k] += value
+				}
+			}
+			for j := range vectors[i].Mean {
+				vectors[i].Mean[j] /= float64(len(vectors[i].Vectors))
+			}
+			for j := range vectors[i].Vectors {
+				for k, value := range vectors[i].Vectors[j].Vector {
+					diff := vectors[i].Mean[k] - value
+					vectors[i].Stddev[k] += diff * diff
+				}
+			}
+			for j := range vectors[i].Stddev {
+				vectors[i].Stddev[j] /= float64(len(vectors[i].Vectors))
+			}
+		}
+
+		sum := 0.0
+		for i, value := range stddev {
+			sum += value
+			for j := range vectors {
+				sum -= vectors[j].Stddev[i]
+			}
+		}
+
+		return sum
+	}
+	optimizer := matrix.NewOptimizer(&rng, 16, .1, 1, func(samples []matrix.Sample, x ...matrix.Matrix) {
+		done := make(chan bool, 8)
+		sample := func(index int, s *matrix.Sample) {
+			s.Cost = process(index, *s)
+			done <- true
+		}
+		index, flight, cpus := 0, 0, runtime.NumCPU()
+		for flight < cpus && index < len(samples) {
+			go sample(index, &samples[index])
+			index++
+			flight++
+		}
+		for index < len(samples) {
+			<-done
+			flight--
+
+			go sample(index, &samples[index])
+			index++
+			flight++
+		}
+		for i := 0; i < flight; i++ {
+			<-done
+		}
+	}, matrix.NewCoord(4, 300))
+	var sample matrix.Sample
+	for i := 0; i < 33; i++ {
+		sample = optimizer.Iterate()
+		fmt.Println(i, sample.Cost)
+	}
+
+	x1 := sample.Vars[0][0].Sample()
+	y1 := sample.Vars[0][1].Sample()
+	z1 := sample.Vars[0][2].Sample()
+	selection := x1.Add(y1.H(z1))
+	for i := 0; i < selection.Rows; i++ {
+		index, max := 0, 0.0
+		for j := 0; j < selection.Cols; j++ {
+			if value := float64(selection.Data[i*selection.Cols+j]); value > max {
+				index, max = j, value
+			}
+		}
+		fmt.Println(index, datum.Fisher[i].Label)
+	}
+}
+
 var (
 	// FlagOne
 	FlagOne = flag.Bool("one", false, "one")
 	// FlagTwo
 	FlagTwo = flag.Bool("two", false, "two")
+	// FlagThree
+	FlagThree = flag.Bool("three", false, "three")
 )
 
 func main() {
@@ -687,6 +860,9 @@ func main() {
 		return
 	} else if *FlagTwo {
 		Starlight2()
+		return
+	} else if *FlagThree {
+		Starlight3()
 		return
 	}
 }
