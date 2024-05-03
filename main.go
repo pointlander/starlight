@@ -601,15 +601,15 @@ func Starlight2() {
 		splitsA := vectors.Split(boundsUpper)
 		splitsB := vectors.Split(boundsLower)
 		for i := range splitsA {
-			if splitsA[i].Var > splitsB[i].Var {
-				for j := splitsA[i].Index; j < splits[i].Index; j++ {
-					vectors.Vectors[j].Labels[i] = 2
-				}
-			} else {
-				for j := splitsB[i].Index; j < len(vectors.Vectors); j++ {
-					vectors.Vectors[j].Labels[i] = 2
-				}
+			//if splitsA[i].Var > splitsB[i].Var {
+			for j := splitsA[i].Index; j < splits[i].Index; j++ {
+				vectors.Vectors[j].Labels[i] = 2
 			}
+			//} else {
+			for j := splitsB[i].Index; j < len(vectors.Vectors); j++ {
+				vectors.Vectors[j].Labels[i] = 3
+			}
+			//}
 		}
 		return vectors
 	}
