@@ -16,6 +16,7 @@ import (
 	"github.com/pointlander/compress"
 	"github.com/pointlander/datum/iris"
 	"github.com/pointlander/matrix"
+	"github.com/pointlander/pagerank"
 	"github.com/pointlander/starlight/kmeans"
 )
 
@@ -864,5 +865,53 @@ func main() {
 	} else if *FlagThree {
 		Starlight3()
 		return
+	}
+
+	graph := pagerank.NewGraph64()
+
+	graph.Link(1, 2, 1.0)
+	graph.Link(2, 1, 1.0)
+	graph.Link(2, 3, 1.0)
+	graph.Link(3, 2, 1.0)
+	graph.Link(3, 1, 1.0)
+	graph.Link(1, 3, 1.0)
+
+	graph.Link(4, 5, 1.0)
+	graph.Link(5, 4, 1.0)
+	graph.Link(5, 6, 1.0)
+	graph.Link(6, 5, 1.0)
+	graph.Link(6, 4, 1.0)
+	graph.Link(4, 6, 1.0)
+
+	graph.Link(1, 4, 1.0)
+	graph.Link(4, 1, 1.0)
+
+	graph.Rank(0.85, 0.000001, func(node uint64, rank float64) {
+		fmt.Println("Node", node, "has a rank of", rank)
+	})
+
+	previous := make([][]float64, 4)
+	previous[0] = []float64{0, 0}
+	previous[1] = []float64{1, 0}
+	previous[2] = []float64{1, 1}
+	previous[3] = []float64{0, 1}
+
+	for i := 0; i < 8; i++ {
+		meta := make([][]float64, 4)
+		for j := range previous {
+			for k := range previous {
+				sum := 0.0
+				for l := range previous[k] {
+					diff := previous[j][l] - previous[k][l]
+					sum += diff * diff
+				}
+				meta[j] = append(meta[j], math.Sqrt(sum))
+			}
+		}
+		for j := range meta {
+			fmt.Println(meta[j])
+		}
+		fmt.Println()
+		previous = meta
 	}
 }
