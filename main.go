@@ -920,8 +920,9 @@ func Starlight4() {
 		return meta
 	}
 	optimizer := matrix.NewOptimizer(&rng, 8, .1, 4, func(samples []matrix.Sample, x ...matrix.Matrix) {
-		for index := range samples {
-			meta := process(samples[index])
+		done := make(chan bool, 8)
+		sample := func(s *matrix.Sample) {
+			meta := process(*s)
 
 			entropy := 0.0
 			for i := range meta {
@@ -940,7 +941,25 @@ func Starlight4() {
 					entropy += p * math.Log(p)
 				}
 			}
-			samples[index].Cost = -entropy / float64(len(meta))
+			s.Cost = -entropy / float64(len(meta))
+			done <- true
+		}
+		index, flight, cpus := 0, 0, runtime.NumCPU()
+		for flight < cpus && index < len(samples) {
+			go sample(&samples[index])
+			index++
+			flight++
+		}
+		for index < len(samples) {
+			<-done
+			flight--
+
+			go sample(&samples[index])
+			index++
+			flight++
+		}
+		for i := 0; i < flight; i++ {
+			<-done
 		}
 	}, matrix.NewCoord(4, 8), matrix.NewCoord(8, 1), matrix.NewCoord(16, 16), matrix.NewCoord(16, 1))
 	var sample matrix.Sample
