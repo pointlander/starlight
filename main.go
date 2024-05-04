@@ -844,6 +844,121 @@ func Starlight3() {
 	}
 }
 
+// Starlight4
+func Starlight4() {
+	rng := matrix.Rand(1)
+
+	datum, err := iris.Load()
+	if err != nil {
+		panic(err)
+	}
+
+	max := 0.0
+	for _, data := range datum.Fisher {
+		for _, measure := range data.Measures {
+			if measure > max {
+				max = measure
+			}
+		}
+	}
+	input := matrix.NewMatrix(4, 150)
+	for _, data := range datum.Fisher {
+		for _, measure := range data.Measures {
+			input.Data = append(input.Data, float32(measure/max))
+		}
+	}
+
+	process := func(sample matrix.Sample) [][]float64 {
+		x1 := sample.Vars[0][0].Sample()
+		y1 := sample.Vars[0][1].Sample()
+		z1 := sample.Vars[0][2].Sample()
+		w1 := x1.Add(y1.H(z1))
+
+		x2 := sample.Vars[1][0].Sample()
+		y2 := sample.Vars[1][1].Sample()
+		z2 := sample.Vars[1][2].Sample()
+		b1 := x2.Add(y2.H(z2))
+
+		x3 := sample.Vars[2][0].Sample()
+		y3 := sample.Vars[2][1].Sample()
+		z3 := sample.Vars[2][2].Sample()
+		w2 := x3.Add(y3.H(z3))
+
+		x4 := sample.Vars[3][0].Sample()
+		y4 := sample.Vars[3][1].Sample()
+		z4 := sample.Vars[3][2].Sample()
+		b2 := x4.Add(y4.H(z4))
+
+		output := w2.MulT(w1.MulT(input).Add(b1).Everett()).Add(b2)
+
+		rawData := make([][]float64, output.Rows)
+		for i := 0; i < output.Rows; i++ {
+			for j := 0; j < output.Cols; j++ {
+				rawData[i] = append(rawData[i], float64(output.Data[i*output.Cols+j]))
+			}
+		}
+		meta := make([][]float64, output.Rows)
+		for i := range meta {
+			meta[i] = make([]float64, output.Rows)
+		}
+
+		for i := 0; i < 100; i++ {
+			clusters, _, err := kmeans.Kmeans(int64(i+1), rawData, 3, kmeans.SquaredEuclideanDistance, -1)
+			if err != nil {
+				panic(err)
+			}
+			for i := range meta {
+				target := clusters[i]
+				for j, v := range clusters {
+					if v == target {
+						meta[i][j]++
+					}
+				}
+			}
+		}
+
+		return meta
+	}
+	optimizer := matrix.NewOptimizer(&rng, 8, .1, 4, func(samples []matrix.Sample, x ...matrix.Matrix) {
+		for index := range samples {
+			meta := process(samples[index])
+
+			entropy := 0.0
+			for i := range meta {
+				sum := 0.0
+				for _, value := range meta[i] {
+					sum += value
+				}
+				if sum == 0 {
+					continue
+				}
+				for _, value := range meta[i] {
+					if value == 0 {
+						continue
+					}
+					p := value / sum
+					entropy += p * math.Log(p)
+				}
+			}
+			samples[index].Cost = -entropy / float64(len(meta))
+		}
+	}, matrix.NewCoord(4, 8), matrix.NewCoord(8, 1), matrix.NewCoord(16, 16), matrix.NewCoord(16, 1))
+	var sample matrix.Sample
+	for i := 0; i < 33; i++ {
+		sample = optimizer.Iterate()
+		fmt.Println(i, sample.Cost)
+	}
+
+	meta := process(sample)
+	clusters, _, err := kmeans.Kmeans(1, meta, 3, kmeans.SquaredEuclideanDistance, -1)
+	if err != nil {
+		panic(err)
+	}
+	for i, v := range clusters {
+		fmt.Printf("%3d %15s %d\n", i, datum.Fisher[i].Label, v)
+	}
+}
+
 var (
 	// FlagOne
 	FlagOne = flag.Bool("one", false, "one")
@@ -851,6 +966,8 @@ var (
 	FlagTwo = flag.Bool("two", false, "two")
 	// FlagThree
 	FlagThree = flag.Bool("three", false, "three")
+	// FlagFour
+	FlagFour = flag.Bool("four", false, "four")
 )
 
 func main() {
@@ -864,6 +981,9 @@ func main() {
 		return
 	} else if *FlagThree {
 		Starlight3()
+		return
+	} else if *FlagFour {
+		Starlight4()
 		return
 	}
 
