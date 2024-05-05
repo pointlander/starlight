@@ -853,18 +853,58 @@ func Starlight4() {
 		panic(err)
 	}
 
-	max := 0.0
-	for _, data := range datum.Fisher {
-		for _, measure := range data.Measures {
-			if measure > max {
-				max = measure
+	var input matrix.Matrix
+	clustersCount := 3
+	if *FlagSynth {
+		clustersCount = 4
+		input = matrix.NewMatrix(4, 150)
+		for _, data := range datum.Fisher {
+			for _, measure := range data.Measures {
+				input.Data = append(input.Data, float32(measure))
 			}
 		}
-	}
-	input := matrix.NewMatrix(4, 150)
-	for _, data := range datum.Fisher {
-		for _, measure := range data.Measures {
-			input.Data = append(input.Data, float32(measure/max))
+		synth := matrix.NewMultiFromData(input.T())
+		synth.LearnA(&rng, nil)
+		for i := 0; i < 150; i++ {
+			vector := make([]float64, 4)
+			measures := synth.Sample(&rng).Data
+			for j := range vector {
+				vector[j] = float64(measures[j])
+			}
+			datum.Fisher = append(datum.Fisher, iris.Iris{
+				Label:    "Synth",
+				Measures: vector,
+			})
+		}
+		max := 0.0
+		for _, data := range datum.Fisher {
+			for _, measure := range data.Measures {
+				if measure > max {
+					max = measure
+				}
+			}
+		}
+		in := matrix.NewMatrix(4, 300)
+		for _, data := range datum.Fisher {
+			for _, measure := range data.Measures {
+				in.Data = append(in.Data, float32(measure/max))
+			}
+		}
+		input = in
+	} else {
+		max := 0.0
+		for _, data := range datum.Fisher {
+			for _, measure := range data.Measures {
+				if measure > max {
+					max = measure
+				}
+			}
+		}
+		input = matrix.NewMatrix(4, 150)
+		for _, data := range datum.Fisher {
+			for _, measure := range data.Measures {
+				input.Data = append(input.Data, float32(measure/max))
+			}
 		}
 	}
 
@@ -903,7 +943,7 @@ func Starlight4() {
 		}
 
 		for i := 0; i < 100; i++ {
-			clusters, _, err := kmeans.Kmeans(int64(i+1), rawData, 3, kmeans.SquaredEuclideanDistance, -1)
+			clusters, _, err := kmeans.Kmeans(int64(i+1), rawData, clustersCount, kmeans.SquaredEuclideanDistance, -1)
 			if err != nil {
 				panic(err)
 			}
@@ -969,7 +1009,7 @@ func Starlight4() {
 	}
 
 	meta := process(sample)
-	clusters, _, err := kmeans.Kmeans(1, meta, 3, kmeans.SquaredEuclideanDistance, -1)
+	clusters, _, err := kmeans.Kmeans(1, meta, clustersCount, kmeans.SquaredEuclideanDistance, -1)
 	if err != nil {
 		panic(err)
 	}
@@ -987,6 +1027,8 @@ var (
 	FlagThree = flag.Bool("three", false, "three")
 	// FlagFour
 	FlagFour = flag.Bool("four", false, "four")
+	// FlagSynth add in synthetic data
+	FlagSynth = flag.Bool("synth", false, "add in synthetic data")
 )
 
 func main() {
