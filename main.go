@@ -68,6 +68,7 @@ type Split struct {
 	Var   float64
 }
 
+// Split divides the data set using variation reduction maximization
 func (v *Vectors) Split(bounds []Bounds) []Split {
 	splits := make([]Split, 0, 8)
 	for col := 0; col < v.Width; col++ {
@@ -120,6 +121,7 @@ func (v *Vectors) Split(bounds []Bounds) []Split {
 	return splits
 }
 
+// SplitMulti divides the data set using multi-variation reduction maximization
 func (v *Vectors) SplitMulti(bounds []Bounds) []Split {
 	splits := make([]Split, 0, 8)
 
@@ -215,40 +217,60 @@ func Starlight() {
 		panic(err)
 	}
 
-	input := matrix.NewMatrix(4, 150)
-	for _, data := range datum.Fisher {
-		for _, measure := range data.Measures {
-			input.Data = append(input.Data, float32(measure))
+	var input matrix.Matrix
+	clustersCount := 3
+	if *FlagSynth {
+		clustersCount = 4
+		input = matrix.NewMatrix(4, 150)
+		for _, data := range datum.Fisher {
+			for _, measure := range data.Measures {
+				input.Data = append(input.Data, float32(measure))
+			}
 		}
-	}
-	synth := matrix.NewMultiFromData(input.T())
-	synth.LearnA(&rng, nil)
-	for i := 0; i < 150; i++ {
-		vector := make([]float64, 4)
-		measures := synth.Sample(&rng).Data
-		for j := range vector {
-			vector[j] = float64(measures[j])
+		synth := matrix.NewMultiFromData(input.T())
+		synth.LearnA(&rng, nil)
+		for i := 0; i < 150; i++ {
+			vector := make([]float64, 4)
+			measures := synth.Sample(&rng).Data
+			for j := range vector {
+				vector[j] = float64(measures[j])
+			}
+			datum.Fisher = append(datum.Fisher, iris.Iris{
+				Label:    "Synth",
+				Measures: vector,
+			})
 		}
-		datum.Fisher = append(datum.Fisher, iris.Iris{
-			Label:    "Synth",
-			Measures: vector,
-		})
-	}
-	max := 0.0
-	for _, data := range datum.Fisher {
-		for _, measure := range data.Measures {
-			if measure > max {
-				max = measure
+		max := 0.0
+		for _, data := range datum.Fisher {
+			for _, measure := range data.Measures {
+				if measure > max {
+					max = measure
+				}
+			}
+		}
+		in := matrix.NewMatrix(4, 300)
+		for _, data := range datum.Fisher {
+			for _, measure := range data.Measures {
+				in.Data = append(in.Data, float32(measure/max))
+			}
+		}
+		input = in
+	} else {
+		max := 0.0
+		for _, data := range datum.Fisher {
+			for _, measure := range data.Measures {
+				if measure > max {
+					max = measure
+				}
+			}
+		}
+		input = matrix.NewMatrix(4, 150)
+		for _, data := range datum.Fisher {
+			for _, measure := range data.Measures {
+				input.Data = append(input.Data, float32(measure/max))
 			}
 		}
 	}
-	in := matrix.NewMatrix(4, 300)
-	for _, data := range datum.Fisher {
-		for _, measure := range data.Measures {
-			in.Data = append(in.Data, float32(measure/max))
-		}
-	}
-	input = in
 
 	entropy := func(clusters []int) {
 		ab, ba := [Clusters][Clusters]float64{}, [Clusters][Clusters]float64{}
@@ -259,10 +281,10 @@ func Starlight() {
 			ba[b][a]++
 		}
 		entropy := 0.0
-		for i := 0; i < Clusters; i++ {
-			entropy += (1.0 / float64(Clusters)) * math.Log(1.0/float64(Clusters))
+		for i := 0; i < clustersCount; i++ {
+			entropy += (1.0 / float64(clustersCount)) * math.Log(1.0/float64(clustersCount))
 		}
-		fmt.Println(-entropy, -(1.0/float64(Clusters))*math.Log(1.0/float64(Clusters)))
+		fmt.Println(-entropy, -(1.0/float64(clustersCount))*math.Log(1.0/float64(clustersCount)))
 		for i := range ab {
 			entropy := 0.0
 			for _, value := range ab[i] {
@@ -364,15 +386,24 @@ func Starlight() {
 		splitsA := vectors.SplitMulti(boundsUpper)
 		splitsB := vectors.SplitMulti(boundsLower)
 		for i := range splitsA {
-			//if splitsA[i].Var > splitsB[i].Var {
-			for j := splitsA[i].Index; j < splits[i].Index; j++ {
-				vectors.Vectors[j].Labels[i] = 2
+			if clustersCount == 4 {
+				for j := splitsA[i].Index; j < splits[i].Index; j++ {
+					vectors.Vectors[j].Labels[i] = 2
+				}
+				for j := splitsB[i].Index; j < len(vectors.Vectors); j++ {
+					vectors.Vectors[j].Labels[i] = 3
+				}
+			} else if clustersCount == 3 {
+				if splitsA[i].Var > splitsB[i].Var {
+					for j := splitsA[i].Index; j < splits[i].Index; j++ {
+						vectors.Vectors[j].Labels[i] = 2
+					}
+				} else {
+					for j := splitsB[i].Index; j < len(vectors.Vectors); j++ {
+						vectors.Vectors[j].Labels[i] = 3
+					}
+				}
 			}
-			//} else {
-			for j := splitsB[i].Index; j < len(vectors.Vectors); j++ {
-				vectors.Vectors[j].Labels[i] = 3
-			}
-			//}
 		}
 		return vectors
 	}
@@ -401,7 +432,7 @@ func Starlight() {
 			<-done
 		}
 	}, matrix.NewCoord(4, 8), matrix.NewCoord(8, 1), matrix.NewCoord(16, 8), matrix.NewCoord(8, 1),
-		matrix.NewCoord(16, 4), matrix.NewCoord(4, 1))
+		matrix.NewCoord(16, clustersCount), matrix.NewCoord(clustersCount, 1))
 	var sample matrix.Sample
 	for i := 0; i < 33; i++ {
 		sample = optimizer.Iterate()
@@ -425,7 +456,7 @@ func Starlight() {
 			rawData[i][j] = diff
 		}
 	}
-	clusters, _, err := kmeans.Kmeans(1, rawData, Clusters, kmeans.SquaredEuclideanDistance, -1)
+	clusters, _, err := kmeans.Kmeans(1, rawData, clustersCount, kmeans.SquaredEuclideanDistance, -1)
 	if err != nil {
 		panic(err)
 	}
@@ -444,40 +475,60 @@ func Starlight2() {
 		panic(err)
 	}
 
-	input := matrix.NewMatrix(4, 150)
-	for _, data := range datum.Fisher {
-		for _, measure := range data.Measures {
-			input.Data = append(input.Data, float32(measure))
+	var input matrix.Matrix
+	clustersCount := 3
+	if *FlagSynth {
+		clustersCount = 4
+		input = matrix.NewMatrix(4, 150)
+		for _, data := range datum.Fisher {
+			for _, measure := range data.Measures {
+				input.Data = append(input.Data, float32(measure))
+			}
 		}
-	}
-	synth := matrix.NewMultiFromData(input.T())
-	synth.LearnA(&rng, nil)
-	for i := 0; i < 150; i++ {
-		vector := make([]float64, 4)
-		measures := synth.Sample(&rng).Data
-		for j := range vector {
-			vector[j] = float64(measures[j])
+		synth := matrix.NewMultiFromData(input.T())
+		synth.LearnA(&rng, nil)
+		for i := 0; i < 150; i++ {
+			vector := make([]float64, 4)
+			measures := synth.Sample(&rng).Data
+			for j := range vector {
+				vector[j] = float64(measures[j])
+			}
+			datum.Fisher = append(datum.Fisher, iris.Iris{
+				Label:    "Synth",
+				Measures: vector,
+			})
 		}
-		datum.Fisher = append(datum.Fisher, iris.Iris{
-			Label:    "Synth",
-			Measures: vector,
-		})
-	}
-	max := 0.0
-	for _, data := range datum.Fisher {
-		for _, measure := range data.Measures {
-			if measure > max {
-				max = measure
+		max := 0.0
+		for _, data := range datum.Fisher {
+			for _, measure := range data.Measures {
+				if measure > max {
+					max = measure
+				}
+			}
+		}
+		in := matrix.NewMatrix(4, 300)
+		for _, data := range datum.Fisher {
+			for _, measure := range data.Measures {
+				in.Data = append(in.Data, float32(measure/max))
+			}
+		}
+		input = in
+	} else {
+		max := 0.0
+		for _, data := range datum.Fisher {
+			for _, measure := range data.Measures {
+				if measure > max {
+					max = measure
+				}
+			}
+		}
+		input = matrix.NewMatrix(4, 150)
+		for _, data := range datum.Fisher {
+			for _, measure := range data.Measures {
+				input.Data = append(input.Data, float32(measure/max))
 			}
 		}
 	}
-	in := matrix.NewMatrix(4, 300)
-	for _, data := range datum.Fisher {
-		for _, measure := range data.Measures {
-			in.Data = append(in.Data, float32(measure/max))
-		}
-	}
-	input = in
 
 	entropy := func(clusters []int) {
 		ab, ba := [Clusters][Clusters]float64{}, [Clusters][Clusters]float64{}
@@ -488,10 +539,10 @@ func Starlight2() {
 			ba[b][a]++
 		}
 		entropy := 0.0
-		for i := 0; i < Clusters; i++ {
-			entropy += (1.0 / float64(Clusters)) * math.Log(1.0/float64(Clusters))
+		for i := 0; i < clustersCount; i++ {
+			entropy += (1.0 / float64(clustersCount)) * math.Log(1.0/float64(clustersCount))
 		}
-		fmt.Println(-entropy, -(1.0/float64(Clusters))*math.Log(1.0/float64(Clusters)))
+		fmt.Println(-entropy, -(1.0/float64(clustersCount))*math.Log(1.0/float64(clustersCount)))
 		for i := range ab {
 			entropy := 0.0
 			for _, value := range ab[i] {
@@ -604,15 +655,24 @@ func Starlight2() {
 		splitsA := vectors.Split(boundsUpper)
 		splitsB := vectors.Split(boundsLower)
 		for i := range splitsA {
-			//if splitsA[i].Var > splitsB[i].Var {
-			for j := splitsA[i].Index; j < splits[i].Index; j++ {
-				vectors.Vectors[j].Labels[i] = 2
+			if clustersCount == 4 {
+				for j := splitsA[i].Index; j < splits[i].Index; j++ {
+					vectors.Vectors[j].Labels[i] = 2
+				}
+				for j := splitsB[i].Index; j < len(vectors.Vectors); j++ {
+					vectors.Vectors[j].Labels[i] = 3
+				}
+			} else if clustersCount == 3 {
+				if splitsA[i].Var > splitsB[i].Var {
+					for j := splitsA[i].Index; j < splits[i].Index; j++ {
+						vectors.Vectors[j].Labels[i] = 2
+					}
+				} else {
+					for j := splitsB[i].Index; j < len(vectors.Vectors); j++ {
+						vectors.Vectors[j].Labels[i] = 3
+					}
+				}
 			}
-			//} else {
-			for j := splitsB[i].Index; j < len(vectors.Vectors); j++ {
-				vectors.Vectors[j].Labels[i] = 3
-			}
-			//}
 		}
 		return vectors
 	}
@@ -665,7 +725,7 @@ func Starlight2() {
 			rawData[i][j] = diff
 		}
 	}
-	clusters, _, err := kmeans.Kmeans(1, rawData, Clusters, kmeans.SquaredEuclideanDistance, -1)
+	clusters, _, err := kmeans.Kmeans(1, rawData, clustersCount, kmeans.SquaredEuclideanDistance, -1)
 	if err != nil {
 		panic(err)
 	}
@@ -684,40 +744,60 @@ func Starlight3() {
 		panic(err)
 	}
 
-	input := matrix.NewMatrix(4, 150)
-	for _, data := range datum.Fisher {
-		for _, measure := range data.Measures {
-			input.Data = append(input.Data, float32(measure))
+	var input matrix.Matrix
+	clustersCount := 3
+	if *FlagSynth {
+		clustersCount = 4
+		input = matrix.NewMatrix(4, 150)
+		for _, data := range datum.Fisher {
+			for _, measure := range data.Measures {
+				input.Data = append(input.Data, float32(measure))
+			}
 		}
-	}
-	synth := matrix.NewMultiFromData(input.T())
-	synth.LearnA(&rng, nil)
-	for i := 0; i < 150; i++ {
-		vector := make([]float64, 4)
-		measures := synth.Sample(&rng).Data
-		for j := range vector {
-			vector[j] = float64(measures[j])
+		synth := matrix.NewMultiFromData(input.T())
+		synth.LearnA(&rng, nil)
+		for i := 0; i < 150; i++ {
+			vector := make([]float64, 4)
+			measures := synth.Sample(&rng).Data
+			for j := range vector {
+				vector[j] = float64(measures[j])
+			}
+			datum.Fisher = append(datum.Fisher, iris.Iris{
+				Label:    "Synth",
+				Measures: vector,
+			})
 		}
-		datum.Fisher = append(datum.Fisher, iris.Iris{
-			Label:    "Synth",
-			Measures: vector,
-		})
-	}
-	max := 0.0
-	for _, data := range datum.Fisher {
-		for _, measure := range data.Measures {
-			if measure > max {
-				max = measure
+		max := 0.0
+		for _, data := range datum.Fisher {
+			for _, measure := range data.Measures {
+				if measure > max {
+					max = measure
+				}
+			}
+		}
+		in := matrix.NewMatrix(4, 300)
+		for _, data := range datum.Fisher {
+			for _, measure := range data.Measures {
+				in.Data = append(in.Data, float32(measure/max))
+			}
+		}
+		input = in
+	} else {
+		max := 0.0
+		for _, data := range datum.Fisher {
+			for _, measure := range data.Measures {
+				if measure > max {
+					max = measure
+				}
+			}
+		}
+		input = matrix.NewMatrix(4, 150)
+		for _, data := range datum.Fisher {
+			for _, measure := range data.Measures {
+				input.Data = append(input.Data, float32(measure/max))
 			}
 		}
 	}
-	in := matrix.NewMatrix(4, 300)
-	for _, data := range datum.Fisher {
-		for _, measure := range data.Measures {
-			in.Data = append(in.Data, float32(measure/max))
-		}
-	}
-	input = in
 
 	process := func(index int, sample matrix.Sample) float64 {
 		x1 := sample.Vars[0][0].Sample()
@@ -822,7 +902,7 @@ func Starlight3() {
 		for i := 0; i < flight; i++ {
 			<-done
 		}
-	}, matrix.NewCoord(4, 300))
+	}, matrix.NewCoord(clustersCount, 300))
 	var sample matrix.Sample
 	for i := 0; i < 33; i++ {
 		sample = optimizer.Iterate()
