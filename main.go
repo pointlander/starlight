@@ -1098,6 +1098,56 @@ func Starlight4() {
 	}
 }
 
+func Starlight5() {
+	rng := matrix.Rand(1)
+
+	datum, err := iris.Load()
+	if err != nil {
+		panic(err)
+	}
+
+	input := matrix.NewMatrix(4, 150)
+	for _, data := range datum.Fisher {
+		for _, measure := range data.Measures {
+			input.Data = append(input.Data, float32(measure))
+		}
+	}
+
+	optimizer := matrix.NewOptimizer(&rng, 8, .1, 1, func(samples []matrix.Sample, x ...matrix.Matrix) {
+		for i := range samples {
+			x1 := samples[i].Vars[0][0].Sample()
+			y1 := samples[i].Vars[0][1].Sample()
+			z1 := samples[i].Vars[0][2].Sample()
+			selection := x1.Add(y1.H(z1))
+
+			adj := input.MulT(input)
+			graph := pagerank.NewGraph64()
+			for i := 0; i < adj.Rows; i++ {
+				for j := 0; j < adj.Cols; j++ {
+					if selection.Data[selection.Cols*i+j] < 0 {
+						continue
+					}
+					graph.Link(uint64(i), uint64(j), float64(adj.Data[i*adj.Cols+j]))
+				}
+			}
+			results := make(map[uint64]float64)
+			graph.Rank(0.85, 0.000001, func(node uint64, rank float64) {
+				results[node] = rank
+			})
+			entropy := 0.0
+			for _, value := range results {
+				entropy += value * math.Log(value)
+			}
+			samples[i].Cost = -entropy
+		}
+	}, matrix.NewCoord(150, 150))
+	var sample matrix.Sample
+	for i := 0; i < 33; i++ {
+		sample = optimizer.Iterate()
+		fmt.Println(i, sample.Cost)
+	}
+}
+
 var (
 	// FlagOne
 	FlagOne = flag.Bool("one", false, "one")
@@ -1107,6 +1157,8 @@ var (
 	FlagThree = flag.Bool("three", false, "three")
 	// FlagFour
 	FlagFour = flag.Bool("four", false, "four")
+	// FlagFive
+	FlagFive = flag.Bool("five", false, "five")
 	// FlagSynth add in synthetic data
 	FlagSynth = flag.Bool("synth", false, "add in synthetic data")
 )
@@ -1125,6 +1177,9 @@ func main() {
 		return
 	} else if *FlagFour {
 		Starlight4()
+		return
+	} else if *FlagFive {
+		Starlight5()
 		return
 	}
 
@@ -1196,11 +1251,14 @@ func main() {
 		}
 	}
 	results := make(map[uint64]float64)
+	sum := 0.0
 	graph.Rank(0.85, 0.000001, func(node uint64, rank float64) {
 		results[node] = rank
+		sum += rank
 	})
 
 	for i := range datum.Fisher {
 		fmt.Println(datum.Fisher[i].Label, results[uint64(i)])
 	}
+	fmt.Println(sum)
 }
