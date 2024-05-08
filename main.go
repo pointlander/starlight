@@ -1175,4 +1175,32 @@ func main() {
 		fmt.Println()
 		previous = meta
 	}
+
+	datum, err := iris.Load()
+	if err != nil {
+		panic(err)
+	}
+
+	input := matrix.NewMatrix(4, 150)
+	for _, data := range datum.Fisher {
+		for _, measure := range data.Measures {
+			input.Data = append(input.Data, float32(measure))
+		}
+	}
+
+	adj := input.MulT(input)
+	graph = pagerank.NewGraph64()
+	for i := 0; i < adj.Rows; i++ {
+		for j := 0; j < adj.Cols; j++ {
+			graph.Link(uint64(i), uint64(j), float64(adj.Data[i*adj.Cols+j]))
+		}
+	}
+	results := make(map[uint64]float64)
+	graph.Rank(0.85, 0.000001, func(node uint64, rank float64) {
+		results[node] = rank
+	})
+
+	for i := range datum.Fisher {
+		fmt.Println(datum.Fisher[i].Label, results[uint64(i)])
+	}
 }
