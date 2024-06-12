@@ -1017,27 +1017,34 @@ func Starlight4() {
 				rawData[i] = append(rawData[i], float64(output.Data[i*output.Cols+j]))
 			}
 		}
-		meta := make([][]float64, output.Rows)
-		for i := range meta {
-			meta[i] = make([]float64, output.Rows)
-		}
+		meta := matrix.NewMatrix(150, 150, make([]float32, output.Rows*output.Rows)...)
 
 		for i := 0; i < 100; i++ {
 			clusters, _, err := kmeans.Kmeans(int64(i+1), rawData, clustersCount, kmeans.SquaredEuclideanDistance, -1)
 			if err != nil {
 				panic(err)
 			}
-			for i := range meta {
+			for i := 0; i < output.Rows; i++ {
 				target := clusters[i]
 				for j, v := range clusters {
 					if v == target {
-						meta[i][j]++
+						meta.Data[i*output.Rows+j]++
 					}
 				}
 			}
 		}
 
-		return meta
+		meta = matrix.SelfAttention(meta, meta, meta)
+
+		x := make([][]float64, 150)
+		for i := range x {
+			x[i] = make([]float64, 150)
+			for j := range x[i] {
+				x[i][j] = float64(meta.Data[i*150+j])
+			}
+		}
+
+		return x
 	}
 	optimizer := matrix.NewOptimizer(&rng, 8, .1, 4, func(samples []matrix.Sample, x ...matrix.Matrix) {
 		done := make(chan bool, 8)
